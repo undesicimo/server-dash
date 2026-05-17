@@ -1,0 +1,17 @@
+services:
+  server-dash:
+    build: .
+    container_name: server-dash
+    ports:
+      - "3001:3001"
+    environment:
+      PORT: "3001"
+      STORAGE_PATH: "/host"
+      APP_NAME: "${APP_NAME:-Server Dash}"
+      HOMER_CONFIG_URL: "${HOMER_CONFIG_URL:-}"
+      APP_CHECK_BASE: "${APP_CHECK_BASE:-}"
+      PUBLIC_LAN_HOST: "${PUBLIC_LAN_HOST:-}"
+      PUBLIC_TAILSCALE_HOST: "${PUBLIC_TAILSCALE_HOST:-}"
+    volumes:
+      - /:/host:ro
+    restart: unless-stopped

@@ -1,0 +1,43 @@
+@import url("https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap");
+@import "tailwindcss";
+
+@theme inline {
+  --font-sans: "Geist", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, monospace;
+  --color-background: oklch(0.975 0.004 240);
+  --color-foreground: oklch(0.18 0.012 240);
+  --color-card: oklch(1 0 0);
+  --color-card-foreground: oklch(0.18 0.012 240);
+  --color-primary: oklch(0.52 0.11 166);
+  --color-primary-foreground: oklch(0.98 0.004 240);
+  --color-secondary: oklch(0.94 0.006 240);
+  --color-secondary-foreground: oklch(0.2 0.012 240);
+  --color-muted: oklch(0.93 0.006 240);
+  --color-muted-foreground: oklch(0.48 0.014 240);
+  --color-accent: oklch(0.91 0.025 166);
+  --color-accent-foreground: oklch(0.24 0.04 166);
+  --color-destructive: oklch(0.56 0.17 25);
+  --color-border: oklch(0.87 0.008 240);
+  --color-input: oklch(0.87 0.008 240);
+  --color-ring: oklch(0.52 0.11 166);
+  --radius: 0.625rem;
+}
+
+* {
+  border-color: var(--color-border);
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100dvh;
+  background:
+    linear-gradient(135deg, rgba(13, 148, 136, 0.08), transparent 36rem),
+    var(--color-background);
+  color: var(--color-foreground);
+  font-family: var(--font-sans);
+}
+
+button {
+  font: inherit;
+}
