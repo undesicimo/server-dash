@@ -8,6 +8,10 @@ It can show:
 - Storage usage from `df -kP`
 - PWA install support for phone home screens
 
+## License
+
+MIT
+
 ## Local development
 
 Install dependencies:
