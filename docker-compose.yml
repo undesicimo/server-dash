@@ -6,12 +6,14 @@ services:
       - "3001:3001"
     environment:
       PORT: "3001"
-      STORAGE_PATH: "/host"
+      STORAGE_PATH: "/host/media/josh/MediaStorage"
       APP_NAME: "${APP_NAME:-Server Dash}"
       HOMER_CONFIG_URL: "${HOMER_CONFIG_URL:-}"
+      HOMER_CONFIG_PATH: "${HOMER_CONFIG_PATH:-/host/home/josh/media-stack/homepage_config/config.yml}"
       APP_CHECK_BASE: "${APP_CHECK_BASE:-}"
       PUBLIC_LAN_HOST: "${PUBLIC_LAN_HOST:-}"
       PUBLIC_TAILSCALE_HOST: "${PUBLIC_TAILSCALE_HOST:-}"
+      HERMES_STATUS_PATH: "${HERMES_STATUS_PATH:-/host/home/josh/.hermes/gateway_state.json}"
     volumes:
       - /:/host:ro
     restart: unless-stopped

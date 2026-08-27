@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs"
+import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import YAML from "yaml"
 
@@ -46,12 +46,27 @@ type AppGroup = {
   items: AppStatus[]
 }
 
+type HermesStatus = {
+  status: "online" | "offline"
+  gatewayState: string | null
+  activeAgents: number
+  connectedPlatforms: number
+  totalPlatforms: number
+  pid: number | null
+  version: string | null
+  updatedAt: string | null
+  checkedAt: string
+  error?: string
+}
+
 const port = Number(Bun.env.PORT ?? 3001)
 const storagePath = Bun.env.STORAGE_PATH ?? "/"
 const homerConfigUrl = Bun.env.HOMER_CONFIG_URL
+const homerConfigPath = Bun.env.HOMER_CONFIG_PATH
 const appCheckBase = Bun.env.APP_CHECK_BASE
 const publicLanHost = Bun.env.PUBLIC_LAN_HOST
 const publicTailscaleHost = Bun.env.PUBLIC_TAILSCALE_HOST
+const hermesStatusPath = Bun.env.HERMES_STATUS_PATH ?? "/host/home/josh/.hermes/gateway_state.json"
 const distPath = join(import.meta.dir, "..", "dist")
 
 function json(data: unknown, init?: ResponseInit) {
@@ -155,7 +170,7 @@ async function checkApp(item: NonNullable<NonNullable<HomerConfig["services"]>[n
 }
 
 async function collectApps() {
-  if (!homerConfigUrl) {
+  if (!homerConfigUrl && !homerConfigPath) {
     return {
       checkedAt: new Date().toISOString(),
       source: null,
@@ -163,13 +178,26 @@ async function collectApps() {
     }
   }
 
-  const response = await fetch(homerConfigUrl)
+  let configText: string
+  let source: string
 
-  if (!response.ok) {
-    throw new Error(`Homer config returned ${response.status}`)
+  if (homerConfigPath) {
+    const file = Bun.file(homerConfigPath)
+    if (!(await file.exists())) {
+      throw new Error(`App config file not found: ${homerConfigPath}`)
+    }
+    configText = await file.text()
+    source = homerConfigPath
+  } else {
+    const response = await fetch(homerConfigUrl!)
+    if (!response.ok) {
+      throw new Error(`Homer config returned ${response.status}`)
+    }
+    configText = await response.text()
+    source = homerConfigUrl!
   }
 
-  const config = YAML.parse(await response.text()) as HomerConfig
+  const config = YAML.parse(configText) as HomerConfig
   const groups = await Promise.all(
     (config.services ?? []).map(async (group): Promise<AppGroup> => ({
       name: group.name ?? "Services",
@@ -179,8 +207,85 @@ async function collectApps() {
 
   return {
     checkedAt: new Date().toISOString(),
-    source: homerConfigUrl,
+    source,
     groups,
+  }
+}
+
+async function collectHermesStatus(): Promise<HermesStatus> {
+  const checkedAt = new Date().toISOString()
+  const stateFile = Bun.file(hermesStatusPath)
+
+  if (!(await stateFile.exists())) {
+    return {
+      status: "offline",
+      gatewayState: null,
+      activeAgents: 0,
+      connectedPlatforms: 0,
+      totalPlatforms: 0,
+      pid: null,
+      version: null,
+      updatedAt: null,
+      checkedAt,
+      error: "Hermes gateway state file not found",
+    }
+  }
+
+  try {
+    const runtime = (await stateFile.json()) as {
+      pid?: number
+      start_time?: number
+      gateway_state?: string
+      active_agents?: number
+      platforms?: Record<string, { state?: string }>
+      updated_at?: string
+      code_version?: string
+    }
+    const pid = Number.isInteger(runtime.pid) ? runtime.pid! : null
+    const recordedStartTime = Number.isInteger(runtime.start_time) ? runtime.start_time! : null
+    let liveStartTime: number | null = null
+
+    if (pid !== null && existsSync(`/host/proc/${pid}/stat`)) {
+      try {
+        const stat = readFileSync(`/host/proc/${pid}/stat`, "utf8")
+        const closingParen = stat.lastIndexOf(") ")
+        const fields = closingParen === -1 ? [] : stat.slice(closingParen + 2).trim().split(/\s+/)
+        const parsedStartTime = Number(fields[19])
+        liveStartTime = Number.isInteger(parsedStartTime) ? parsedStartTime : null
+      } catch {
+        liveStartTime = null
+      }
+    }
+
+    // Match Hermes' recorded process start time to the live kernel value so a
+    // reused PID cannot make stale gateway state look current.
+    const processRunning = pid !== null && recordedStartTime !== null && liveStartTime === recordedStartTime
+    const platforms = Object.values(runtime.platforms ?? {})
+
+    return {
+      status: processRunning && runtime.gateway_state === "running" ? "online" : "offline",
+      gatewayState: runtime.gateway_state ?? null,
+      activeAgents: Number.isFinite(runtime.active_agents) ? runtime.active_agents! : 0,
+      connectedPlatforms: platforms.filter((platform) => platform.state === "connected").length,
+      totalPlatforms: platforms.length,
+      pid,
+      version: runtime.code_version ?? null,
+      updatedAt: runtime.updated_at ?? null,
+      checkedAt,
+    }
+  } catch (error) {
+    return {
+      status: "offline",
+      gatewayState: null,
+      activeAgents: 0,
+      connectedPlatforms: 0,
+      totalPlatforms: 0,
+      pid: null,
+      version: null,
+      updatedAt: null,
+      checkedAt,
+      error: error instanceof Error ? error.message : "Unable to read Hermes status",
+    }
   }
 }
 
@@ -209,7 +314,7 @@ Bun.serve({
         appName: Bun.env.APP_NAME ?? "Server Dash",
         publicLanHost: publicLanHost ?? null,
         publicTailscaleHost: publicTailscaleHost ?? null,
-        homerConfigured: Boolean(homerConfigUrl),
+        homerConfigured: Boolean(homerConfigUrl || homerConfigPath),
       })
     }
 
@@ -239,6 +344,10 @@ Bun.serve({
           { status: 500 },
         )
       }
+    }
+
+    if (url.pathname === "/api/hermes") {
+      return json(await collectHermesStatus())
     }
 
     if (existsSync(distPath)) {

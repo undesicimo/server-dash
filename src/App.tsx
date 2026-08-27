@@ -1,4 +1,4 @@
-import { ArrowClockwise, HardDrives, LinkSimple, WarningCircle } from "@phosphor-icons/react"
+import { ArrowClockwise, HardDrives, LinkSimple, Robot, WarningCircle } from "@phosphor-icons/react"
 import { useEffect, useMemo, useState } from "react"
 
 import { Badge } from "@/components/ui/badge"
@@ -48,6 +48,19 @@ type PublicConfig = {
   publicLanHost: string | null
   publicTailscaleHost: string | null
   homerConfigured: boolean
+}
+
+type HermesStatus = {
+  status: "online" | "offline"
+  gatewayState: string | null
+  activeAgents: number
+  connectedPlatforms: number
+  totalPlatforms: number
+  pid: number | null
+  version: string | null
+  updatedAt: string | null
+  checkedAt: string
+  error?: string
 }
 
 function formatBytes(kb: number) {
@@ -168,6 +181,40 @@ function useApps() {
   return { data, error, isLoading, refresh: load }
 }
 
+function useHermesStatus() {
+  const [data, setData] = useState<HermesStatus | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [isLoading, setIsLoading] = useState(true)
+
+  async function load() {
+    setIsLoading(true)
+    setError(null)
+
+    try {
+      const response = await fetch("/api/hermes")
+      const payload = await response.json()
+
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Hermes status request failed")
+      }
+
+      setData(payload)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to load Hermes status")
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    load()
+    const timer = window.setInterval(load, 15_000)
+    return () => window.clearInterval(timer)
+  }, [])
+
+  return { data, error, isLoading, refresh: load }
+}
+
 function UsageBar({ value }: { value: number }) {
   return (
     <div className="h-2 w-full overflow-hidden rounded-full bg-secondary">
@@ -199,6 +246,7 @@ export default function App() {
   const publicConfig = usePublicConfig()
   const { data, error, isLoading, refresh } = useStorageStats()
   const apps = useApps()
+  const hermes = useHermesStatus()
 
   const primaryDisk = data?.rows[0]
   const appTotals = useMemo(() => {
@@ -257,7 +305,7 @@ export default function App() {
 
               {apps.data && !apps.data.groups.length ? (
                 <div className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
-                  Configure `HOMER_CONFIG_URL` to import app links from Homer.
+                  Configure `HOMER_CONFIG_PATH` or `HOMER_CONFIG_URL` to import app links.
                 </div>
               ) : apps.isLoading && !apps.data ? (
                 <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
@@ -289,6 +337,8 @@ export default function App() {
         </section>
 
         <aside className="space-y-4 lg:sticky lg:top-5 lg:self-start">
+          <HermesCard {...hermes} />
+
           <Card className="shadow-[0_24px_70px_-54px_rgba(15,23,42,0.4)]">
             <CardHeader className="flex-row items-center justify-between gap-3 space-y-0 p-4">
               <div className="flex items-center gap-3">
@@ -373,6 +423,80 @@ export default function App() {
         </aside>
       </div>
     </main>
+  )
+}
+
+function HermesCard({
+  data,
+  error,
+  isLoading,
+  refresh,
+}: {
+  data: HermesStatus | null
+  error: string | null
+  isLoading: boolean
+  refresh: () => Promise<void>
+}) {
+  const isOnline = data?.status === "online"
+  const statusLabel = data ? data.status : "checking"
+
+  return (
+    <Card className="shadow-[0_24px_70px_-54px_rgba(15,23,42,0.4)]">
+      <CardHeader className="flex-row items-center justify-between gap-3 space-y-0 p-4">
+        <div className="flex items-center gap-3">
+          <div className="flex size-9 items-center justify-center rounded-md bg-accent text-accent-foreground">
+            <Robot weight="duotone" className="size-5" />
+          </div>
+          <div>
+            <p className="text-xs font-medium text-muted-foreground">Agent</p>
+            <CardTitle className="text-lg">Hermes</CardTitle>
+          </div>
+        </div>
+        <Button variant="outline" size="icon" onClick={refresh} disabled={isLoading} aria-label="Refresh Hermes status">
+          <ArrowClockwise className={cn(isLoading && "animate-spin")} />
+        </Button>
+      </CardHeader>
+
+      <CardContent className="space-y-3 p-4 pt-0">
+        {error || data?.error ? (
+          <div className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-xs text-destructive">
+            <div className="mb-1 flex items-center gap-2 font-medium">
+              <WarningCircle className="size-4" />
+              Hermes status unavailable
+            </div>
+            <p>{error ?? data?.error}</p>
+          </div>
+        ) : null}
+
+        <div className="flex items-center justify-between gap-3 rounded-md border p-3">
+          <div className="flex items-center gap-2">
+            <span className={cn("size-2 rounded-full", isOnline ? "bg-primary" : "bg-destructive")} />
+            <span className="text-sm font-medium">Gateway</span>
+          </div>
+          <Badge variant={!data ? "secondary" : isOnline ? "default" : "destructive"} className="font-mono">
+            {statusLabel}
+          </Badge>
+        </div>
+
+        <div className="grid grid-cols-2 gap-2 text-sm">
+          <div className="rounded-md border p-3">
+            <p className="text-[11px] font-medium text-muted-foreground">Active agents</p>
+            <p className="mt-1 font-mono font-semibold">{data?.activeAgents ?? "—"}</p>
+          </div>
+          <div className="rounded-md border p-3">
+            <p className="text-[11px] font-medium text-muted-foreground">Platforms</p>
+            <p className="mt-1 font-mono font-semibold">
+              {data ? `${data.connectedPlatforms}/${data.totalPlatforms}` : "—"}
+            </p>
+          </div>
+        </div>
+
+        <p className="text-xs text-muted-foreground">
+          {data?.version ? `v${data.version} · ` : ""}
+          Updated {data?.updatedAt ? new Date(data.updatedAt).toLocaleTimeString() : "pending"}
+        </p>
+      </CardContent>
+    </Card>
   )
 }
 
