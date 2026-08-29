@@ -66,6 +66,7 @@ const homerConfigPath = Bun.env.HOMER_CONFIG_PATH
 const appCheckBase = Bun.env.APP_CHECK_BASE
 const publicLanHost = Bun.env.PUBLIC_LAN_HOST
 const publicTailscaleHost = Bun.env.PUBLIC_TAILSCALE_HOST
+const workoutAppUrl = Bun.env.WORKOUT_APP_URL ?? "http://192.168.1.9:3002"
 const hermesStatusPath = Bun.env.HERMES_STATUS_PATH ?? "/host/home/josh/.hermes/gateway_state.json"
 const distPath = join(import.meta.dir, "..", "dist")
 
@@ -314,6 +315,7 @@ Bun.serve({
         appName: Bun.env.APP_NAME ?? "Server Dash",
         publicLanHost: publicLanHost ?? null,
         publicTailscaleHost: publicTailscaleHost ?? null,
+        workoutAppUrl,
         homerConfigured: Boolean(homerConfigUrl || homerConfigPath),
       })
     }

@@ -13,6 +13,7 @@ services:
       APP_CHECK_BASE: "${APP_CHECK_BASE:-}"
       PUBLIC_LAN_HOST: "${PUBLIC_LAN_HOST:-}"
       PUBLIC_TAILSCALE_HOST: "${PUBLIC_TAILSCALE_HOST:-}"
+      WORKOUT_APP_URL: "${WORKOUT_APP_URL:-http://192.168.1.9:3002}"
       HERMES_STATUS_PATH: "${HERMES_STATUS_PATH:-/host/home/josh/.hermes/gateway_state.json}"
     volumes:
       - /:/host:ro

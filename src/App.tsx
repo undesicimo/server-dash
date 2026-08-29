@@ -1,4 +1,4 @@
-import { ArrowClockwise, HardDrives, LinkSimple, Robot, WarningCircle } from "@phosphor-icons/react"
+import { ArrowClockwise, Barbell, HardDrives, LinkSimple, Robot, WarningCircle } from "@phosphor-icons/react"
 import { useEffect, useMemo, useState } from "react"
 
 import { Badge } from "@/components/ui/badge"
@@ -47,6 +47,7 @@ type PublicConfig = {
   appName: string
   publicLanHost: string | null
   publicTailscaleHost: string | null
+  workoutAppUrl: string | null
   homerConfigured: boolean
 }
 
@@ -105,6 +106,7 @@ function usePublicConfig() {
           appName: "Server Dash",
           publicLanHost: null,
           publicTailscaleHost: null,
+          workoutAppUrl: "http://192.168.1.9:3002",
           homerConfigured: false,
         })
       })
@@ -304,8 +306,11 @@ export default function App() {
               ) : null}
 
               {apps.data && !apps.data.groups.length ? (
-                <div className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
-                  Configure `HOMER_CONFIG_PATH` or `HOMER_CONFIG_URL` to import app links.
+                <div className="space-y-3">
+                  <WorkoutTile url={getDeviceAwareUrl(publicConfig?.workoutAppUrl ?? "http://192.168.1.9:3002", publicConfig)} />
+                  <div className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
+                    Configure `HOMER_CONFIG_PATH` or `HOMER_CONFIG_URL` to import app links.
+                  </div>
                 </div>
               ) : apps.isLoading && !apps.data ? (
                 <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
@@ -315,6 +320,9 @@ export default function App() {
                 </div>
               ) : (
                 <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                  <div className="md:col-span-2 xl:col-span-3">
+                    <WorkoutTile url={getDeviceAwareUrl(publicConfig?.workoutAppUrl ?? "http://192.168.1.9:3002", publicConfig)} />
+                  </div>
                   {apps.data?.groups.map((group) => (
                     <div key={group.name} className="space-y-2">
                       <div className="flex items-center justify-between px-1">
@@ -423,6 +431,29 @@ export default function App() {
         </aside>
       </div>
     </main>
+  )
+}
+
+function WorkoutTile({ url }: { url: string }) {
+  return (
+    <a
+      href={url}
+      target="_blank"
+      rel="noreferrer"
+      className="flex min-h-24 items-center justify-between gap-4 rounded-md border border-primary/25 bg-accent/35 p-4 transition-[background,transform,border-color] hover:border-primary/50 hover:bg-accent/60 active:translate-y-px"
+    >
+      <div className="flex items-center gap-3">
+        <div className="flex size-11 items-center justify-center rounded-md bg-primary text-primary-foreground">
+          <Barbell weight="bold" className="size-5" />
+        </div>
+        <div>
+          <p className="text-xs font-medium text-muted-foreground">Personal</p>
+          <p className="text-base font-semibold">Workout manager</p>
+          <p className="mt-1 text-xs text-muted-foreground">Your A / B / C / D rotation and plan assistant</p>
+        </div>
+      </div>
+      <span className="shrink-0 rounded-md border border-primary/20 bg-background/70 px-3 py-2 text-xs font-semibold text-primary">Open app →</span>
+    </a>
   )
 }
 
