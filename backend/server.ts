@@ -1,5 +1,7 @@
 import { existsSync, readFileSync } from "node:fs"
-import { join } from "node:path"
+import { mkdir, rename, writeFile } from "node:fs/promises"
+import { randomUUID } from "node:crypto"
+import { dirname, join } from "node:path"
 import YAML from "yaml"
 
 type StorageRow = {
@@ -69,12 +71,103 @@ const publicTailscaleHost = Bun.env.PUBLIC_TAILSCALE_HOST
 const workoutAppUrl = Bun.env.WORKOUT_APP_URL ?? "http://192.168.1.9:3002"
 const hermesStatusPath = Bun.env.HERMES_STATUS_PATH ?? "/host/home/josh/.hermes/gateway_state.json"
 const distPath = join(import.meta.dir, "..", "dist")
+const envStorePath = Bun.env.ENV_STORE_PATH ?? "/app/data/envs.json"
+const envNamePattern = /^[A-Za-z_][A-Za-z0-9_]*$/
+const reservedEnvNames = new Set(["__proto__", "constructor", "prototype"])
+const maxEnvRequestBytes = 64 * 1024
+
+type EnvValues = Record<string, string>
+
+class EnvApiError extends Error {
+  constructor(
+    readonly status: number,
+    message: string,
+  ) {
+    super(message)
+  }
+}
+
+function isValidEnvName(name: string) {
+  return envNamePattern.test(name) && !reservedEnvNames.has(name)
+}
+
+function parseEnvValues(value: unknown): EnvValues {
+  if (value === null || Array.isArray(value) || typeof value !== "object") {
+    throw new Error("Environment store must be a JSON object")
+  }
+
+  const entries = Object.entries(value as Record<string, unknown>)
+  const result: EnvValues = Object.create(null)
+  for (const [name, secret] of entries) {
+    if (!isValidEnvName(name) || typeof secret !== "string") {
+      throw new Error("Environment store contains an invalid entry")
+    }
+    result[name] = secret
+  }
+  return result
+}
+
+async function loadEnvValues(): Promise<EnvValues> {
+  await mkdir(dirname(envStorePath), { recursive: true })
+  const file = Bun.file(envStorePath)
+  if (!(await file.exists())) return Object.create(null)
+  return parseEnvValues(await file.json())
+}
+
+async function readRequestText(request: Request, maxBytes: number): Promise<string | null> {
+  const reader = request.body?.getReader()
+  if (!reader) return ""
+
+  const chunks: Uint8Array[] = []
+  let byteLength = 0
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      byteLength += value.byteLength
+      if (byteLength > maxBytes) {
+        await reader.cancel()
+        return null
+      }
+      chunks.push(value)
+    }
+  } finally {
+    reader.releaseLock()
+  }
+
+  const bytes = new Uint8Array(byteLength)
+  let offset = 0
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset)
+    offset += chunk.byteLength
+  }
+  return new TextDecoder().decode(bytes)
+}
+
+let envValues = await loadEnvValues()
+let envWriteQueue: Promise<void> = Promise.resolve()
+
+function updateEnvValues(change: (next: EnvValues) => void) {
+  const operation = envWriteQueue.then(async () => {
+    const next = Object.assign(Object.create(null), envValues) as EnvValues
+    change(next)
+    const temporaryPath = `${envStorePath}.${process.pid}.${randomUUID()}.tmp`
+    await writeFile(temporaryPath, `${JSON.stringify(next, null, 2)}\n`, { mode: 0o600 })
+    await rename(temporaryPath, envStorePath)
+    envValues = next
+  })
+
+  envWriteQueue = operation.catch(() => {})
+  return operation
+}
 
 function json(data: unknown, init?: ResponseInit) {
   return new Response(JSON.stringify(data, null, 2), {
     ...init,
     headers: {
       "content-type": "application/json; charset=utf-8",
+      "cache-control": "no-store",
+      "x-content-type-options": "nosniff",
       ...init?.headers,
     },
   })
@@ -350,6 +443,76 @@ Bun.serve({
 
     if (url.pathname === "/api/hermes") {
       return json(await collectHermesStatus())
+    }
+
+    if (url.pathname === "/api/envs" && request.method === "GET") {
+      return json({ envs: Object.keys(envValues).sort() })
+    }
+
+    const envMatch = url.pathname.match(/^\/api\/envs\/([^/]+)$/)
+    if (envMatch) {
+      let name: string
+      try {
+        name = decodeURIComponent(envMatch[1])
+      } catch {
+        return json({ error: "Invalid environment name" }, { status: 400 })
+      }
+      if (!isValidEnvName(name)) {
+        return json({ error: "Invalid environment name" }, { status: 400 })
+      }
+
+      if (request.method === "GET") {
+        if (!Object.hasOwn(envValues, name)) {
+          return json({ error: "Environment value not found" }, { status: 404 })
+        }
+        return json({ key: name, value: envValues[name] })
+      }
+
+      if (request.method === "PUT") {
+        let body: unknown
+        try {
+          const text = await readRequestText(request, maxEnvRequestBytes)
+          if (text === null) return json({ error: "Request body is too large" }, { status: 413 })
+          body = JSON.parse(text)
+        } catch {
+          return json({ error: "Expected a JSON value" }, { status: 400 })
+        }
+        if (body === null || typeof body !== "object" || typeof (body as { value?: unknown }).value !== "string") {
+          return json({ error: "Expected a string value" }, { status: 400 })
+        }
+
+        try {
+          await updateEnvValues((next) => {
+            next[name] = (body as { value: string }).value
+          })
+          return json({ saved: true, key: name })
+        } catch {
+          return json({ error: "Unable to save environment value" }, { status: 500 })
+        }
+      }
+
+      if (request.method === "DELETE") {
+        try {
+          await updateEnvValues((next) => {
+            if (!Object.hasOwn(next, name)) throw new EnvApiError(404, "Environment value not found")
+            delete next[name]
+          })
+          return json({ deleted: true, key: name })
+        } catch (error) {
+          if (error instanceof EnvApiError) return json({ error: error.message }, { status: error.status })
+          return json({ error: "Unable to delete environment value" }, { status: 500 })
+        }
+      }
+
+      return json({ error: "Method not allowed" }, { status: 405 })
+    }
+
+    if (url.pathname.startsWith("/api/envs/")) {
+      return json({ error: "Environment endpoint not found" }, { status: 404 })
+    }
+
+    if (url.pathname === "/api/envs" && request.method !== "GET") {
+      return json({ error: "Method not allowed" }, { status: 405 })
     }
 
     if (existsSync(distPath)) {

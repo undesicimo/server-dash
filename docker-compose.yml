@@ -17,4 +17,8 @@ services:
       HERMES_STATUS_PATH: "${HERMES_STATUS_PATH:-/host/home/josh/.hermes/gateway_state.json}"
     volumes:
       - /:/host:ro
+      - server_dash_envs:/app/data
     restart: unless-stopped
+
+volumes:
+  server_dash_envs:

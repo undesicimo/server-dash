@@ -112,3 +112,12 @@ App status:
 ```bash
 GET /api/apps
 ```
+
+Environment values:
+
+```bash
+GET /api/envs
+GET /api/envs/{name}
+```
+
+`GET /api/envs` returns the saved names only. `GET /api/envs/{name}` returns one value as JSON. Values can be added, updated, and deleted in the Environment values page at `/envs`; data persists in the `server_dash_envs` Docker volume.

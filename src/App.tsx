@@ -1,5 +1,5 @@
 import { ArrowClockwise, Barbell, HardDrives, LinkSimple, Robot, WarningCircle } from "@phosphor-icons/react"
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useState, type FormEvent } from "react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -271,6 +271,10 @@ export default function App() {
     )
   }, [data])
 
+  if (window.location.pathname === "/envs") {
+    return <EnvironmentValuesPage />
+  }
+
   return (
     <main className="min-h-[100dvh] px-4 py-5 sm:px-6 lg:px-8">
       <div className="mx-auto grid max-w-7xl gap-4 lg:grid-cols-[1fr_22rem]">
@@ -282,6 +286,12 @@ export default function App() {
                 <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">Media stack</h1>
               </div>
               <div className="flex items-center justify-between gap-2 sm:justify-end">
+                <a
+                  href="/envs"
+                  className="inline-flex h-9 items-center rounded-md border bg-background px-3 text-sm font-medium transition-colors hover:bg-accent"
+                >
+                  Env values
+                </a>
                 <Badge variant={appTotals.online === appTotals.total ? "default" : "destructive"} className="font-mono">
                   {appTotals.online}/{appTotals.total || 0} online
                 </Badge>
@@ -429,6 +439,186 @@ export default function App() {
             </CardFooter>
           </Card>
         </aside>
+      </div>
+    </main>
+  )
+}
+
+type EnvValue = {
+  key: string
+  value: string
+}
+
+async function envRequest<T>(path: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(path, { cache: "no-store", ...init })
+  const payload = await response.json()
+  if (!response.ok) throw new Error(payload.error ?? "Environment request failed")
+  return payload as T
+}
+
+function EnvironmentValuesPage() {
+  const [envNames, setEnvNames] = useState<string[]>([])
+  const [key, setKey] = useState("")
+  const [value, setValue] = useState("")
+  const [editing, setEditing] = useState(false)
+  const [isLoading, setIsLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [message, setMessage] = useState<string | null>(null)
+
+  async function loadNames() {
+    setIsLoading(true)
+    setError(null)
+    try {
+      const result = await envRequest<{ envs: string[] }>("/api/envs")
+      setEnvNames(result.envs)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to load environment names")
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    void loadNames()
+  }, [])
+
+  function resetForm() {
+    setKey("")
+    setValue("")
+    setEditing(false)
+    setError(null)
+    setMessage(null)
+  }
+
+  async function editEnvValue(name: string) {
+    setError(null)
+    setMessage(null)
+    try {
+      const result = await envRequest<EnvValue>(`/api/envs/${encodeURIComponent(name)}`)
+      setKey(result.key)
+      setValue(result.value)
+      setEditing(true)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to load environment value")
+    }
+  }
+
+  async function saveEnvValue(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setError(null)
+    setMessage(null)
+    const name = key.trim()
+    try {
+      await envRequest(`/api/envs/${encodeURIComponent(name)}`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ value }),
+      })
+      resetForm()
+      await loadNames()
+      setMessage(`Saved ${name}.`)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to save environment value")
+    }
+  }
+
+  async function deleteEnvValue(name: string) {
+    if (!window.confirm(`Delete ${name}?`)) return
+    setError(null)
+    setMessage(null)
+    try {
+      await envRequest(`/api/envs/${encodeURIComponent(name)}`, { method: "DELETE" })
+      if (key === name) resetForm()
+      await loadNames()
+      setMessage(`Deleted ${name}.`)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to delete environment value")
+    }
+  }
+
+  return (
+    <main className="min-h-[100dvh] px-4 py-5 sm:px-6 lg:px-8">
+      <div className="mx-auto max-w-3xl space-y-4">
+        <header className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-card p-4 sm:p-5">
+          <div>
+            <p className="text-sm font-medium text-muted-foreground">Server Dash</p>
+            <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">Environment values</h1>
+          </div>
+          <a
+            href="/"
+            className="inline-flex h-9 items-center rounded-md border bg-background px-3 text-sm font-medium transition-colors hover:bg-accent"
+          >
+            ← Media stack
+          </a>
+        </header>
+
+        <Card>
+          <CardHeader className="p-4 sm:p-5">
+            <CardTitle>{editing ? "Update value" : "Add value"}</CardTitle>
+          </CardHeader>
+          <CardContent className="p-4 pt-0 sm:p-5 sm:pt-0">
+            <form className="space-y-4" onSubmit={saveEnvValue}>
+              <label className="block space-y-1.5 text-sm font-medium">
+                <span>Name</span>
+                <input
+                  className="block w-full rounded-md border bg-background px-3 py-2 font-mono text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
+                  value={key}
+                  onChange={(event) => setKey(event.target.value)}
+                  pattern="[A-Za-z_][A-Za-z0-9_]*"
+                  title="Use letters, numbers, and underscores; start with a letter or underscore."
+                  autoComplete="off"
+                  spellCheck={false}
+                  disabled={editing}
+                  required
+                />
+              </label>
+              <label className="block space-y-1.5 text-sm font-medium">
+                <span>Value</span>
+                <textarea
+                  className="block min-h-32 w-full resize-y rounded-md border bg-background px-3 py-2 font-mono text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  value={value}
+                  onChange={(event) => setValue(event.target.value)}
+                  autoComplete="off"
+                  spellCheck={false}
+                />
+              </label>
+              <div className="flex flex-wrap gap-2">
+                <Button type="submit">{editing ? "Update" : "Save"}</Button>
+                {editing ? <Button type="button" variant="outline" onClick={resetForm}>Cancel</Button> : null}
+              </div>
+            </form>
+            {error ? <p className="mt-3 text-sm text-destructive">{error}</p> : null}
+            {message ? <p className="mt-3 text-sm text-primary">{message}</p> : null}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex-row items-center justify-between p-4 sm:p-5">
+            <CardTitle>Saved names</CardTitle>
+            <Button variant="outline" size="sm" onClick={() => void loadNames()} disabled={isLoading}>
+              Refresh
+            </Button>
+          </CardHeader>
+          <CardContent className="p-4 pt-0 sm:p-5 sm:pt-0">
+            {isLoading ? (
+              <p className="text-sm text-muted-foreground">Loading…</p>
+            ) : envNames.length ? (
+              <ul className="divide-y">
+                {envNames.map((name) => (
+                  <li key={name} className="flex flex-wrap items-center justify-between gap-3 py-3 first:pt-0 last:pb-0">
+                    <code className="min-w-0 break-all text-sm">{name}</code>
+                    <div className="flex shrink-0 gap-2">
+                      <Button variant="outline" size="sm" onClick={() => void editEnvValue(name)}>Edit</Button>
+                      <Button variant="outline" size="sm" onClick={() => void deleteEnvValue(name)}>Delete</Button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-sm text-muted-foreground">No values saved.</p>
+            )}
+          </CardContent>
+        </Card>
       </div>
     </main>
   )
