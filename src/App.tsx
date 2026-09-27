@@ -586,7 +586,7 @@ function EnvironmentValuesPage() {
               <label className="block space-y-1.5 text-sm font-medium">
                 <span>Name</span>
                 <input
-                  className="block w-full rounded-md border bg-background px-3 py-2 font-mono text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
+                  className="block w-full rounded-md border bg-background px-3 py-2 font-mono text-base outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
                   value={key}
                   onChange={(event) => setKey(event.target.value)}
                   pattern="[A-Za-z_][A-Za-z0-9_]*"
@@ -599,7 +599,7 @@ function EnvironmentValuesPage() {
               <label className="block space-y-1.5 text-sm font-medium">
                 <span>Value</span>
                 <textarea
-                  className="block min-h-32 w-full resize-y rounded-md border bg-background px-3 py-2 font-mono text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  className="block min-h-32 w-full resize-y rounded-md border bg-background px-3 py-2 font-mono text-base outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   value={value}
                   onChange={(event) => setValue(event.target.value)}
                   autoComplete="off"
