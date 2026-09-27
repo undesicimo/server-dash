@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs"
 import { mkdir, rename, writeFile } from "node:fs/promises"
-import { randomUUID } from "node:crypto"
+import { createHash, randomUUID } from "node:crypto"
 import { dirname, join } from "node:path"
 import YAML from "yaml"
 
@@ -88,7 +88,12 @@ class EnvApiError extends Error {
 }
 
 function isValidEnvName(name: string) {
-  return envNamePattern.test(name) && !reservedEnvNames.has(name)
+  const match = envNamePattern.exec(name)
+  return match?.[0] === name && !reservedEnvNames.has(name)
+}
+
+function envValueETag(value: string) {
+  return `"${createHash("sha256").update(value).digest("base64url")}"`
 }
 
 function parseEnvValues(value: unknown): EnvValues {
@@ -465,7 +470,8 @@ Bun.serve({
         if (!Object.hasOwn(envValues, name)) {
           return json({ error: "Environment value not found" }, { status: 404 })
         }
-        return json({ key: name, value: envValues[name] })
+        const value = envValues[name]
+        return json({ key: name, value }, { headers: { etag: envValueETag(value) } })
       }
 
       if (request.method === "PUT") {
@@ -480,13 +486,35 @@ Bun.serve({
         if (body === null || typeof body !== "object" || typeof (body as { value?: unknown }).value !== "string") {
           return json({ error: "Expected a string value" }, { status: 400 })
         }
+        const requestedName = request.headers.get("x-env-key")
+        const targetName = requestedName ?? name
+        if (!isValidEnvName(targetName)) {
+          return json({ error: "Invalid environment name" }, { status: 400 })
+        }
+        const expectedETag = request.headers.get("if-match")
+        if (targetName !== name && !expectedETag) {
+          return json({ error: "Expected If-Match when renaming" }, { status: 428 })
+        }
 
         try {
           await updateEnvValues((next) => {
-            next[name] = (body as { value: string }).value
+            if (targetName !== name) {
+              if (!Object.hasOwn(next, name)) {
+                throw new EnvApiError(404, "Environment value not found")
+              }
+              if (envValueETag(next[name]) !== expectedETag) {
+                throw new EnvApiError(409, "Environment value changed; reload it before renaming")
+              }
+              if (Object.hasOwn(next, targetName)) {
+                throw new EnvApiError(409, "Environment name already exists")
+              }
+              delete next[name]
+            }
+            next[targetName] = (body as { value: string }).value
           })
-          return json({ saved: true, key: name })
-        } catch {
+          return json({ saved: true, key: targetName, renamedFrom: targetName === name ? undefined : name })
+        } catch (error) {
+          if (error instanceof EnvApiError) return json({ error: error.message }, { status: error.status })
           return json({ error: "Unable to save environment value" }, { status: 500 })
         }
       }

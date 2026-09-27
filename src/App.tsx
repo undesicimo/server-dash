@@ -447,6 +447,7 @@ export default function App() {
 type EnvValue = {
   key: string
   value: string
+  etag: string
 }
 
 async function envRequest<T>(path: string, init?: RequestInit): Promise<T> {
@@ -456,9 +457,20 @@ async function envRequest<T>(path: string, init?: RequestInit): Promise<T> {
   return payload as T
 }
 
+async function getEnvValue(name: string): Promise<EnvValue> {
+  const response = await fetch(`/api/envs/${encodeURIComponent(name)}`, { cache: "no-store" })
+  const payload = await response.json()
+  if (!response.ok) throw new Error(payload.error ?? "Environment request failed")
+  const etag = response.headers.get("etag")
+  if (!etag) throw new Error("Environment value version is missing")
+  return { ...(payload as Omit<EnvValue, "etag">), etag }
+}
+
 function EnvironmentValuesPage() {
   const [envNames, setEnvNames] = useState<string[]>([])
   const [key, setKey] = useState("")
+  const [originalKey, setOriginalKey] = useState("")
+  const [originalETag, setOriginalETag] = useState("")
   const [value, setValue] = useState("")
   const [editing, setEditing] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
@@ -484,6 +496,8 @@ function EnvironmentValuesPage() {
 
   function resetForm() {
     setKey("")
+    setOriginalKey("")
+    setOriginalETag("")
     setValue("")
     setEditing(false)
     setError(null)
@@ -494,8 +508,10 @@ function EnvironmentValuesPage() {
     setError(null)
     setMessage(null)
     try {
-      const result = await envRequest<EnvValue>(`/api/envs/${encodeURIComponent(name)}`)
+      const result = await getEnvValue(name)
       setKey(result.key)
+      setOriginalKey(result.key)
+      setOriginalETag(result.etag)
       setValue(result.value)
       setEditing(true)
     } catch (err) {
@@ -508,15 +524,24 @@ function EnvironmentValuesPage() {
     setError(null)
     setMessage(null)
     const name = key.trim()
+    const sourceName = editing ? originalKey : name
+    if (["__proto__", "constructor", "prototype"].includes(name)) {
+      setError("That environment name is reserved.")
+      return
+    }
     try {
-      await envRequest(`/api/envs/${encodeURIComponent(name)}`, {
+      await envRequest(`/api/envs/${encodeURIComponent(sourceName)}`, {
         method: "PUT",
-        headers: { "content-type": "application/json" },
+        headers: {
+          "content-type": "application/json",
+          ...(editing ? { "x-env-key": name } : {}),
+          ...(editing && sourceName !== name ? { "if-match": originalETag } : {}),
+        },
         body: JSON.stringify({ value }),
       })
       resetForm()
       await loadNames()
-      setMessage(`Saved ${name}.`)
+      setMessage(editing && sourceName !== name ? `Renamed ${sourceName} to ${name}.` : `Saved ${name}.`)
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to save environment value")
     }
@@ -528,7 +553,7 @@ function EnvironmentValuesPage() {
     setMessage(null)
     try {
       await envRequest(`/api/envs/${encodeURIComponent(name)}`, { method: "DELETE" })
-      if (key === name) resetForm()
+      if (originalKey === name) resetForm()
       await loadNames()
       setMessage(`Deleted ${name}.`)
     } catch (err) {
@@ -568,7 +593,6 @@ function EnvironmentValuesPage() {
                   title="Use letters, numbers, and underscores; start with a letter or underscore."
                   autoComplete="off"
                   spellCheck={false}
-                  disabled={editing}
                   required
                 />
               </label>
